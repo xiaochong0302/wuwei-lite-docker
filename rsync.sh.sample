@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+PASSWORD_FILE=/root/rsync_password.txt
+
+REMOTE_USER=rsync
+
+REMOTE_HOST=192.168.100.111
+
+LOCAL_DIR=/root/backup
+
+rsync -avz --delete --password-file=${PASSWORD_FILE} rsync://${REMOTE_USER}@${REMOTE_HOST}/mysql ${LOCAL_DIR}/mysql
+
+rsync -avz --delete --password-file=${PASSWORD_FILE} rsync://${REMOTE_USER}@${REMOTE_HOST}/upload ${LOCAL_DIR}/upload
+
+rsync -avz --delete --password-file=${PASSWORD_FILE} rsync://${REMOTE_USER}@${REMOTE_HOST}/record ${LOCAL_DIR}/record

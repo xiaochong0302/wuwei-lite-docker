@@ -1,0 +1,1 @@
+FROM hightman/xunsearch:latest

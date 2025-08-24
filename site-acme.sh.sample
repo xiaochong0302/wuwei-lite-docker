@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+#your email
+email=abc@163.com
+
+#your domain
+domain=abc.com
+
+# ------------ @@@ The following content should NOT be modified by non-professionals! @@@ ------------- #
+
+#基准目录
+base_dir=~/wuwei-docker
+
+#acme.sh项目目录
+acme_dir=${base_dir}/acme.sh
+
+#网站目录
+site_dir=${base_dir}/html/wuwei/public
+
+#ssl目录
+ssl_dir=${base_dir}/nginx/ssl
+
+#ssl key文件
+ssl_key_file=${ssl_dir}/acme.wuwei.key
+
+#ssl_crt文件
+ssl_crt_file=${ssl_dir}/acme.wuwei.crt
+
+#acme.sh命令（直接使用会报错找不到命令）
+acme_cmd=~/.acme.sh/acme.sh
+
+#安装acme.sh
+if [ ! -f ${acme_cmd} ]; then
+  git clone https://github.com/acmesh-official/acme.sh.git ${acme_dir}
+  cd ${acme_dir} && ./acme.sh --install -m ${email}
+fi
+
+#生成证书
+${acme_cmd} --issue -d ${domain} --webroot ${site_dir}
+
+#安装证书
+${acme_cmd} --install-cert -d ${domain} \
+  --key-file ${ssl_key_file} \
+  --fullchain-file ${ssl_crt_file} \
+  --reloadcmd "docker restart wuwei-nginx"
+
+#设置证书文件权限
+chmod 644 ${ssl_key_file} ${ssl_crt_file}
+
+#自动更新
+${acme_cmd} --upgrade --auto-upgrade
+
+#删除acme.sh目录
+if [ -d ${acme_dir} ]; then
+  rm -rf ${acme_dir}
+fi

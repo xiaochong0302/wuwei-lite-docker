@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+# number of days to keep backups
+KEEP_DAYS=15
+
+# backup directory
+BACKUP_DIR=/root/wuwei-docker/mysql/data/backup
+
+# Load environment variables from .env file
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+else
+  echo "error: .env file not found"
+  exit 1
+fi
+
+docker exec -i wuwei-mysql bash <<'EOF'
+
+# backup directory
+backup_dir=/var/lib/mysql/backup
+
+# create backup directory
+if [ ! -d ${backup_dir} ]; then
+  mkdir -p ${backup_dir}
+fi
+
+# export data
+mysqldump --no-tablespaces -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE} | gzip > ${backup_dir}/${MYSQL_DATABASE}-$(date +%Y-%m-%d).sql.gz
+
+exit
+EOF
+
+# delete backup files older than KEEP_DAYS
+find ${BACKUP_DIR} -mtime +${KEEP_DAYS} -name "*.sql.gz" | xargs rm -f

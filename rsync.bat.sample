@@ -1,0 +1,21 @@
+@echo off
+
+set RSYNC_DIR=C:\koogua\cwrsync
+
+set RSYNC_EXE=%RSYNC_DIR%\bin\rsync.exe
+
+set PASSWORD_FILE=%RSYNC_DIR%\rsync_password.txt
+
+set REMOTE_USER=rsync
+
+set REMOTE_HOST=192.168.100.111
+
+set LOCAL_DIR= /cygdrive/C/koogua/backup
+
+%RSYNC_EXE% -avz --delete --password-file="%PASSWORD_FILE%" rsync://%REMOTE_USER%@%REMOTE_HOST%/mysql %LOCAL_DIR%/mysql
+
+%RSYNC_EXE% -avz --delete --password-file="%PASSWORD_FILE%" rsync://%REMOTE_USER%@%REMOTE_HOST%/upload %LOCAL_DIR%/upload
+
+%RSYNC_EXE% -avz --delete --password-file="%PASSWORD_FILE%" rsync://%REMOTE_USER%@%REMOTE_HOST%/record %LOCAL_DIR%/record
+
+pause

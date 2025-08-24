@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+#docker目录
+docker_dir=/root/wuwei-docker
+
+#wuwei目录
+wuwei_dir=${docker_dir}/html/wuwei
+
+#config.php
+config_php=${wuwei_dir}/config/config.php
+
+#静态文件版本号
+static_version=$(date +%s)
+
+#普通信息输出
+normal_print() {
+  echo -e "\033[34m \n $1 \n \033[0m"
+}
+
+#成功信息输出
+success_print() {
+  echo -e "\033[32m \n $1 \n \033[0m"
+}
+
+#失败信息输出
+error_print() {
+  echo -e "\033[31m \n $1 \n \033[0m"
+}
+
+if [ ! -d "${wuwei_dir}" ]; then
+  error_print "------ wuwei dir not existed ------"
+fi
+
+normal_print "------ git pull wuwei-docker ------"
+
+#拉取docker更新
+cd ${docker_dir} && git pull --no-rebase
+
+normal_print "------ git pull wuwei ------"
+
+#拉取wuwei源码更新
+cd ${wuwei_dir} && git pull --no-rebase
+
+#更新静态资源版本号
+sed -i "s/\$config\['static_version'\].*/\$config['static_version'] = '${static_version}';/g" "${config_php}"
+
+normal_print "------ wuwei upgrade ------"
+
+docker exec -i wuwei-php bash <<'EOF'
+
+#切换到wuwei目录
+cd /var/www/html/wuwei || exit
+
+#安装依赖包
+composer install --no-dev
+composer dump-autoload --optimize
+
+#数据迁移
+vendor/bin/phinx migrate
+
+#程序升级
+php console.php upgrade
+
+exit
+EOF
+
+success_print "------ upgrade finished -------"

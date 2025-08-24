@@ -1,0 +1,93 @@
+services:
+
+  nginx:
+    build: ./nginx
+    image: wuwei/nginx:latest
+    container_name: wuwei-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./html:/var/www/html
+      - /data/upload:/var/www/html/wuwei/public/upload
+      - /data/record:/var/www/html/wuwei/public/record
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/logrotate.sh:/etc/nginx/logrotate.sh
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/log:/var/log/nginx
+    networks:
+      - koogua
+    restart: always
+
+  php:
+    build: ./php
+    image: wuwei/php:latest
+    container_name: wuwei-php
+    expose:
+      - 9000
+      - 8282
+    volumes:
+      - ./html:/var/www/html
+      - /data/upload:/var/www/html/wuwei/public/upload
+      - /data/record:/var/www/html/wuwei/public/record
+      - ./php/log:/var/log/php-fpm
+      - ./php/php-fpm.d/zz-docker.conf:/usr/local/etc/php-fpm.d/zz-docker.conf
+      - ./php/conf.d/my.ini:/usr/local/etc/php/conf.d/my.ini
+      - ./php/cron.d/wuwei:/etc/cron.d/wuwei
+      - ./php/supervisor/conf.d:/etc/supervisor/conf.d
+      - ./php/supervisor/log:/var/log/supervisor
+    command: ["supervisord", "-n"]
+    networks:
+      - koogua
+    restart: always
+
+  mysql:
+    build: ./mysql
+    image: wuwei/mysql:latest
+    container_name: wuwei-mysql
+    expose:
+      - 3306
+    volumes:
+      - ./mysql/conf.d/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/log:/var/log/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    networks:
+      - koogua
+    restart: always
+
+  redis:
+    build: ./redis
+    image: wuwei/redis:latest
+    container_name: wuwei-redis
+    expose:
+      - 6379
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./redis/data:/data
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD}"]
+    networks:
+      - koogua
+    restart: always
+
+  xunsearch:
+    build: ./xunsearch
+    image: wuwei/xunsearch:latest
+    container_name: wuwei-xunsearch
+    expose:
+      - 8383
+      - 8384
+    volumes:
+      - ./xunsearch/data:/usr/local/xunsearch/data
+    networks:
+      - koogua
+    restart: always
+
+networks:
+  koogua:
+    driver: bridge

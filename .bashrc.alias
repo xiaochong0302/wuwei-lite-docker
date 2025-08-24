@@ -1,0 +1,5 @@
+alias docker_nginx="docker exec -it wuwei-nginx /bin/bash"
+alias docker_php="docker exec -it wuwei-php /bin/bash"
+alias docker_mysql="docker exec -it wuwei-mysql /bin/bash"
+alias docker_redis="docker exec -it wuwei-redis /bin/bash"
+alias docker_xunsearch="docker exec -it wuwei-xunsearch /bin/bash"
