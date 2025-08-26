@@ -1,1 +1,1 @@
-FROM phalconphp/cphalcon:v5.9.3-php8.2
+FROM xiaochong0302/php:wuwei-lite
