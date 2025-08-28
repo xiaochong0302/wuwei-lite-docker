@@ -299,9 +299,6 @@ if [ -z "$(command -v docker-compose)" ]; then
   exit 1
 fi
 
-#设置应用目录属主
-chown -R 33:33 ${wuwei_dir} ${upload_dir} ${record_dir}
-
 #mysql日志目录
 mysql_log_dir=${base_dir}/mysql/log
 
@@ -365,6 +362,13 @@ EOF
   rm -f ${demo_sql_gz}
 
 fi
+
+#设置应用目录属主
+chown -R 33:33 ${wuwei_dir} ${upload_dir} ${record_dir}
+
+#设置应用目录权限
+find ${wuwei_dir} ${upload_dir} ${record_dir} -type d -exec chmod 755 {} \;
+find ${wuwei_dir} ${upload_dir} ${record_dir} -type f -exec chmod 644 {} \;
 
 normal_print "------ wuwei console upgrade ------"
 
