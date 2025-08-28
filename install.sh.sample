@@ -240,7 +240,7 @@ site_key=$(random_str 16)
 
 #替换config.php配置项
 sed -i "s/\$config\['key'\].*/\$config['key'] = '${site_key}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['storage_base_uri'\].*/\$config['storage_base_uri'] = '${SITE_DOMAIN}';/g" ${wuwei_config_php}
+sed -i "s/\$config\['storage_base_uri'\].*/\$config['storage_base_uri'] = 'https:\/\/${SITE_DOMAIN}';/g" ${wuwei_config_php}
 sed -i "s/\$config\['db'\]\['host'\].*/\$config['db']['host'] = '${MYSQL_HOST}';/g" ${wuwei_config_php}
 sed -i "s/\$config\['db'\]\['port'\].*/\$config['db']['port'] = '${MYSQL_PORT}';/g" ${wuwei_config_php}
 sed -i "s/\$config\['db'\]\['dbname'\].*/\$config['db']['dbname'] = '${MYSQL_DATABASE}';/g" ${wuwei_config_php}
@@ -334,7 +334,7 @@ if [ "${SITE_DEMO}" = 'on' ]; then
 
   normal_print "------ download img.tar.gz ------"
 
-  if [ ! -d ${upload_dir}/img ]; then
+  if [ ! -d ${upload_dir}/img/cover ]; then
     curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/img.tar.gz -o ${img_gz}
     tar -zxf ${img_gz} -C ${upload_dir} && rm -f ${img_gz}
   fi
