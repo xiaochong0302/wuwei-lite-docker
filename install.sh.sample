@@ -236,7 +236,7 @@ wuwei_config_php=${wuwei_config_dir}/config.php
 cp ${wuwei_config_dir}/config.default.php ${wuwei_config_php}
 
 #生成随机站点密钥
-site_key=$(random_str 16)
+site_key=$(random_str 32)
 
 #替换config.php配置项
 sed -i "s/\$config\['key'\].*/\$config['key'] = '${site_key}';/g" ${wuwei_config_php}
