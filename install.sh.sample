@@ -182,10 +182,10 @@ normal_print "------ git clone wuwei ------"
 #克隆wuwei项目
 if [ ! -d ${wuwei_dir} ]; then
 
-  git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite.git ${wuwei_dir}
-
   #忽略文件模式（权限）变更
   git config --global core.fileMode false
+
+  git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite.git ${wuwei_dir}
 
   #加入安全目录
   git config --global --add safe.directory ${wuwei_dir}
