@@ -184,6 +184,7 @@ if [ ! -d ${wuwei_dir} ]; then
 
   #忽略文件模式（权限）变更
   git config --global core.fileMode false
+  git config --global core.autocrlf false
 
   git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite.git ${wuwei_dir}
 
@@ -367,8 +368,8 @@ fi
 chown -R 33:33 ${wuwei_dir} ${upload_dir} ${record_dir}
 
 #设置应用目录权限
-find ${wuwei_dir} ${upload_dir} ${record_dir} -type d -exec chmod 755 {} \;
-find ${wuwei_dir} ${upload_dir} ${record_dir} -type f -exec chmod 644 {} \;
+find ${upload_dir} ${record_dir} -type d -exec chmod 755 {} \;
+find ${upload_dir} ${record_dir} -type f -exec chmod 644 {} \;
 
 normal_print "------ wuwei console upgrade ------"
 
