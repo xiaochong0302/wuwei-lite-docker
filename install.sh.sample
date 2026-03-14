@@ -69,6 +69,9 @@ os_type() {
   fi
 }
 
+#MySQL用户ID（官方镜像默认为999）
+MYSQL_UID=999
+
 #mysql超级用户密码
 MYSQL_ROOT_PASSWORD=$(random_str 16)
 
@@ -87,8 +90,8 @@ MYSQL_USER=wuwei
 #mysql项目数据库密码
 MYSQL_PASSWORD=$(random_str 16)
 
-#MySQL用户ID（官方镜像默认为999）
-MYSQL_UID=999
+#Redis用户ID（官方镜像默认为999）
+REDIS_UID=999
 
 #redis主机名称
 REDIS_HOST=redis
@@ -288,11 +291,11 @@ EOF
   chmod 666 /var/run/docker.sock
 fi
 
-#mysql日志目录
-mysql_log_dir=${base_dir}/mysql/log
+#修改mysql数据目录属主
+chown -R ${MYSQL_UID}:${MYSQL_UID} ${base_dir}/mysql/data ${base_dir}/mysql/log
 
-#修改mysql日志目录的属主，否则启动不了
-chown -R ${MYSQL_UID}:${MYSQL_UID} ${mysql_log_dir}
+#修改redis数据目录属主
+chown -R ${REDIS_UID}:${REDIS_UID} ${base_dir}/redis/data
 
 #切换到基准目录
 cd ${base_dir} || exit
