@@ -291,6 +291,18 @@ EOF
   chmod 666 /var/run/docker.sock
 fi
 
+#统一创建 www-data 用户（兼容所有 Linux 发行版）
+if ! id -u www-data &>/dev/null; then
+  useradd -r -s /sbin/nologin www-data 2>/dev/null || true
+fi
+
+#设置应用目录属主
+chown -R www-data:www-data ${wuwei_dir} ${upload_dir} ${record_dir}
+
+#设置应用目录权限
+find ${upload_dir} ${record_dir} -type d -exec chmod 755 {} \;
+find ${upload_dir} ${record_dir} -type f -exec chmod 644 {} \;
+
 #修改mysql数据目录属主
 chown -R ${MYSQL_UID}:${MYSQL_UID} ${base_dir}/mysql/data ${base_dir}/mysql/log
 
@@ -354,13 +366,6 @@ EOF
   rm -f ${demo_sql_gz}
 
 fi
-
-#设置应用目录属主
-chown -R www-data:www-data ${wuwei_dir} ${upload_dir} ${record_dir}
-
-#设置应用目录权限
-find ${upload_dir} ${record_dir} -type d -exec chmod 755 {} \;
-find ${upload_dir} ${record_dir} -type f -exec chmod 644 {} \;
 
 normal_print "------ wuwei console upgrade ------"
 
