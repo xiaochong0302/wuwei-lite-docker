@@ -291,7 +291,7 @@ EOF
   chmod 666 /var/run/docker.sock
 fi
 
-#统一创建 www-data 用户（兼容所有 Linux 发行版）
+#统一创建www-data用户（兼容所有Linux发行版）
 if ! id -u www-data &>/dev/null; then
   useradd -r -s /sbin/nologin www-data 2>/dev/null || true
 fi
