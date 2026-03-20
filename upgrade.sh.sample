@@ -46,7 +46,8 @@ sed -i "s/\$config\['static_version'\].*/\$config['static_version'] = '${static_
 
 normal_print "------ wuwei upgrade ------"
 
-docker exec -i wuwei-php bash <<'EOF'
+#使用www-data用户运行，避免权限问题
+docker exec -i --user www-data:www-data wuwei-php bash <<'EOF'
 
 #切换到wuwei目录
 cd /var/www/html/wuwei || exit
