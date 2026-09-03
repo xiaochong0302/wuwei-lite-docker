@@ -1,1 +1,1 @@
-FROM mysql:8.0-bookworm
+FROM mysql:8.4-oracle
