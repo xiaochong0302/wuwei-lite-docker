@@ -1,4 +1,4 @@
-FROM xiaochong0302/php:wuwei-lite
+FROM xiaochong0302/php:wuwei-phalcon-5.23.0
 
 ARG PHP_INI_DIR=/usr/local/etc/php
 
