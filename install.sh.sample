@@ -41,31 +41,457 @@ os_type() {
     return 1
   fi
 
-  # 获取ID和ID_LIKE（去除引号）
   local os_id os_like
   os_id=$(grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
   os_like=$(grep '^ID_LIKE=' /etc/os-release | cut -d= -f2 | tr -d '"')
 
-  # 主判断逻辑
-  if [[ "$os_id" == "centos" || "$os_id" == "rhel" || "$os_id" == "almalinux" || "$os_id" == "rocky" || "$os_id" == "ol" ]]; then
-    echo "rhel" # 统一返回RHEL兼容系
-  elif [[ "$os_id" == "ubuntu" ]]; then
-    echo "ubuntu"
-  elif [[ "$os_id" == "debian" ]]; then
-    echo "debian"
-  elif [[ "$os_id" == "opensuse-leap" || "$os_id" == "sles" ]]; then
-    echo "suse"
-  else
-    # 处理衍生版（通过ID_LIKE判断）
-    if [[ "$os_like" == *"rhel"* || "$os_like" == *"centos"* || "$os_like" == *"fedora"* ]]; then
+  case "$os_id" in
+    centos|rhel|almalinux|rocky|ol)
       echo "rhel"
-    elif [[ "$os_like" == *"suse"* ]]; then
+      ;;
+    ubuntu)
+      echo "ubuntu"
+      ;;
+    debian)
+      echo "debian"
+      ;;
+    opensuse-leap|sles)
       echo "suse"
-    elif [[ "$os_like" == *"debian"* ]]; then
+      ;;
+    alpine)
+      echo "alpine"
+      ;;
+    *)
+
+    if [[ "$os_like" =~ (rhel|centos|fedora) ]]; then
+      echo "rhel"
+    elif [[ "$os_like" =~ suse ]]; then
+      echo "suse"
+    elif [[ "$os_like" =~ debian ]]; then
       echo "debian"
     else
       echo "other"
     fi
+    ;;
+  esac
+}
+
+#参数解析
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --demo)
+    SITE_DEMO="$2"
+    shift 2
+    ;;
+  --domain)
+    SITE_DOMAIN="$2"
+    shift 2
+    ;;
+  *)
+    echo "unknown param: $1" >&2
+    exit 1
+    ;;
+  esac
+  done
+
+  #检查--domain参数
+  if [ -z "$SITE_DOMAIN" ]; then
+    error_print '--domain param is required'
+    exit 1
+  fi
+}
+
+#检查root用户
+check_root() {
+  if [[ $EUID -ne 0 ]]; then
+    error_print "------ this script must be run as root ------"
+    exit 1
+  fi
+}
+
+#判断系统架构
+check_arch() {
+  if [[ "$(uname -m)" != "x86_64" ]]; then
+    error_print "------ we only support x86_64 architecture currently ------"
+    exit 1
+  fi
+}
+
+#安装依赖包
+install_packages() {
+  local os=$1
+
+  normal_print "------ install git and other dependencies ------ "
+
+  case "${os}" in
+    ubuntu|debian)
+      apt-get update -qq
+      apt-get install -y -qq curl git netcat-openbsd
+      ;;
+    rhel)
+      if command -v dnf &>/dev/null; then
+        dnf install --refresh -y curl git nmap-ncat
+      else
+        yum check-update
+        yum install -y curl git nmap-ncat
+      fi
+      ;;
+    suse)
+      zypper --non-interactive refresh
+      zypper --non-interactive install -y curl git netcat-openbsd
+      ;;
+    alpine)
+      apk add --no-cache curl git netcat-openbsd bash
+      ;;
+    *)
+      error_print "unsupported OS: ${os}"
+      return 1
+      ;;
+  esac
+}
+
+#安装docker
+install_docker() {
+  local get_docker_sh=$1
+
+  normal_print "------ install docker ------"
+
+  #安装docker
+  if [ -z "$(command -v docker)" ]; then
+    bash "${get_docker_sh}"
+  fi
+
+  if [ -z "$(command -v docker)" ]; then
+    error_print "------ error: docker command not found, please try again ------"
+    exit 1
+  fi
+}
+
+#配置docker
+configure_docker() {
+  if [ ! -d '/etc/docker' ]; then
+    mkdir -p '/etc/docker'
+  fi
+
+  if [ ! -e '/etc/docker/daemon.json' ]; then
+    tee -a /etc/docker/daemon.json <<-EOF
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "500m",
+    "max-file": "3"
+  }
+}
+EOF
+    systemctl daemon-reload
+    systemctl restart docker
+  fi
+}
+
+#克隆项目
+clone_projects() {
+  local base_dir=$1
+  local wuwei_dir=$2
+
+  normal_print "------ git clone wuwei-docker ------"
+
+  #克隆wuwei-docker项目
+  if [ ! -d "${base_dir}" ]; then
+    git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite-docker.git "${base_dir}"
+  else
+    cd "${base_dir}" && git pull --no-rebase
+  fi
+
+  normal_print "------ git clone wuwei ------"
+
+  #克隆wuwei项目
+  if [ ! -d "${wuwei_dir}" ]; then
+
+    #忽略文件模式（权限）变更
+    git config --global core.fileMode false
+    git config --global core.autocrlf false
+
+    git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite.git "${wuwei_dir}"
+
+    #加入安全目录
+    git config --global --add safe.directory "${wuwei_dir}"
+
+  else
+    cd "${wuwei_dir}" && git pull --no-rebase
+  fi
+}
+
+#初始化环境变量
+init_env_variables() {
+  local base_dir=$1
+
+  #docker .env文件
+  local docker_env=${base_dir}/.env
+
+  #复制环境变量文件
+  cp "${base_dir}/.env.default" "${docker_env}"
+
+  #替换docker .env配置项
+  sed -i "s/MYSQL_ROOT_PASSWORD.*/MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}/g" "${docker_env}"
+  sed -i "s/MYSQL_DATABASE.*/MYSQL_DATABASE=${MYSQL_DATABASE}/g" "${docker_env}"
+  sed -i "s/MYSQL_USER.*/MYSQL_USER=${MYSQL_USER}/g" "${docker_env}"
+  sed -i "s/MYSQL_PASSWORD.*/MYSQL_PASSWORD=${MYSQL_PASSWORD}/g" "${docker_env}"
+  sed -i "s/REDIS_PASSWORD.*/REDIS_PASSWORD=${REDIS_PASSWORD}/g" "${docker_env}"
+}
+
+#配置nginx
+configure_nginx() {
+  local base_dir=$1
+  local site_domain=$2
+
+  #nginx配置目录
+  local nginx_conf_dir=${base_dir}/nginx/conf.d
+  local nginx_default_conf=${nginx_conf_dir}/default.conf
+
+  #复制nginx站点配置文件
+  cp "${nginx_conf_dir}/default.conf.sample" "${nginx_default_conf}"
+
+  #替换nginx default.conf配置项
+  sed -i "s/server_name .*/server_name ${site_domain};/g" "${nginx_default_conf}"
+}
+
+#配置应用
+configure_application() {
+  local wuwei_dir=$1
+  local mysql_host=$2
+  local mysql_port=$3
+  local mysql_database=$4
+  local mysql_user=$5
+  local mysql_password=$6
+  local redis_host=$7
+  local redis_password=$8
+  local site_domain=$9
+
+  #wuwei config目录
+  local wuwei_config_dir=${wuwei_dir}/config
+  local wuwei_config_php=${wuwei_config_dir}/config.php
+
+  #复制config.php
+  cp "${wuwei_config_dir}/config.default.php" "${wuwei_config_php}"
+
+  #生成随机站点密钥
+  local site_key
+  site_key=$(random_str 32)
+
+  #替换config.php配置项
+  sed -i "s/\$config\['key'\].*/\$config['key'] = '${site_key}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['storage_base_uri'\].*/\$config['storage_base_uri'] = 'https:\/\/${site_domain}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['db'\]\['host'\].*/\$config['db']['host'] = '${mysql_host}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['db'\]\['port'\].*/\$config['db']['port'] = '${mysql_port}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['db'\]\['dbname'\].*/\$config['db']['dbname'] = '${mysql_database}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['db'\]\['username'\].*/\$config['db']['username'] = '${mysql_user}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['db'\]\['password'\].*/\$config['db']['password'] = '${mysql_password}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['redis'\]\['host'\].*/\$config['redis']['host'] = '${redis_host}';/g" "${wuwei_config_php}"
+  sed -i "s/\$config\['redis'\]\['auth'\].*/\$config['redis']['auth'] = '${redis_password}';/g" "${wuwei_config_php}"
+}
+
+#复制xunsearch配置文件
+copy_xunsearch_config() {
+  local wuwei_dir=$1
+
+  #wuwei config目录
+  local wuwei_config_dir=${wuwei_dir}/config
+
+  #复制xunsearch配置文件
+  cp "${wuwei_config_dir}/xs.course.default.ini" "${wuwei_config_dir}/xs.course.ini"
+  cp "${wuwei_config_dir}/xs.chapter.default.ini" "${wuwei_config_dir}/xs.chapter.ini"
+}
+
+#创建上传、录制目录
+setup_directories() {
+  local upload_dir=$1
+  local record_dir=$2
+  local wuwei_dir=$3
+
+  #创建上传目录，拷贝默认图片
+  if [ ! -d "${upload_dir}" ]; then
+    mkdir -p "${upload_dir}/img"
+    cp -R "${wuwei_dir}/public/static/home/img/default" "${upload_dir}/img"
+  fi
+
+  #创建录制目录
+  if [ ! -d "${record_dir}" ]; then
+    mkdir -p "${record_dir}"
+  fi
+}
+
+#创建www-data用户
+create_www_data_user() {
+  #统一创建www-data用户（兼容所有Linux发行版）
+  if ! id -u www-data &>/dev/null; then
+    useradd -r -s /sbin/nologin www-data 2>/dev/null || true
+  fi
+}
+
+#设置目录权限
+setup_directory_permissions() {
+  local base_dir=$1
+  local wuwei_dir=$2
+  local upload_dir=$3
+  local record_dir=$4
+  local mysql_uid=$5
+  local redis_uid=$6
+
+  #设置应用目录属主
+  chown -R www-data:www-data "${wuwei_dir}" "${upload_dir}" "${record_dir}"
+
+  #设置应用目录权限
+  find "${upload_dir}" "${record_dir}" -type d -exec chmod 755 {} \;
+  find "${upload_dir}" "${record_dir}" -type f -exec chmod 644 {} \;
+
+  #修改mysql数据目录属主
+  chown -R "${mysql_uid}:${mysql_uid}" "${base_dir}/mysql/data" "${base_dir}/mysql/log"
+
+  #修改redis数据目录属主
+  chown -R "${redis_uid}:${redis_uid}" "${base_dir}/redis/data"
+}
+
+#启动docker服务
+start_docker_services() {
+  local base_dir=$1
+
+  normal_print "------ build docker images ------"
+
+  #切换到基准目录
+  cd "${base_dir}" || exit
+
+  docker compose up -d
+}
+
+#等待mysql服务
+wait_mysql_service() {
+  docker exec -i wuwei-php bash <<'EOF'
+
+until nc -z -v -w30 mysql 3306 &> /dev/null
+do
+  echo "waiting for mysql service..."
+  sleep 5
+done
+
+exit
+EOF
+}
+
+#导入测试数据
+import_demo_data() {
+  local base_dir=$1
+  local upload_dir=$2
+
+  local img_gz=${upload_dir}/img.tar.gz
+
+  normal_print "------ download img.tar.gz ------"
+
+  if [ ! -d "${upload_dir}/img/cover" ]; then
+    curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/img.tar.gz -o "${img_gz}"
+    tar -zxf "${img_gz}" -C "${upload_dir}" && rm -f "${img_gz}"
+  fi
+
+  local media_gz=${upload_dir}/media.tar.gz
+
+  normal_print "------ download media.tar.gz ------"
+
+  if [ ! -d "${upload_dir}/media" ]; then
+    curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/media.tar.gz -o "${media_gz}"
+    tar -zxf "${media_gz}" -C "${upload_dir}" && rm -f "${media_gz}"
+  fi
+
+  local demo_sql_gz=${base_dir}/mysql/data/demo.sql.gz
+
+  normal_print "------ import demo.sql.gz ------"
+
+  curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/demo.sql.gz -o "${demo_sql_gz}"
+
+  docker exec -i wuwei-mysql bash <<'EOF'
+
+  gunzip < /var/lib/mysql/demo.sql.gz | mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}"
+
+  exit
+
+EOF
+
+  rm -f "${demo_sql_gz}"
+}
+
+#初始化应用
+init_application() {
+  normal_print "------ wuwei console upgrade ------"
+
+  #使用www-data用户运行，避免权限问题
+  docker exec -i --user www-data:www-data wuwei-php bash <<'EOF'
+
+wuwei_dir=/var/www/html/wuwei
+
+#切换到wuwei目录
+cd ${wuwei_dir}
+
+echo -e "\n------ install composer packages ------\n"
+
+#安装依赖包
+composer install --no-dev
+composer dump-autoload --optimize
+
+echo -e "\n------ phinx migrate ------\n"
+
+#数据迁移
+vendor/bin/phinx migrate
+
+echo -e "\n------ php console upgrade ------\n"
+
+#程序升级
+php console.php upgrade
+
+echo -e "\n------ rebuild xunsearch index ------\n"
+
+#重建xunsearch索引
+php console.php course_index rebuild
+php console.php chapter_index rebuild
+
+#清理log
+rm -f storage/log/*.log
+
+exit
+EOF
+}
+
+#检查服务状态
+check_services_status() {
+  local docker_ps
+  docker_ps=$(docker ps)
+
+  if [[ "${docker_ps}" =~ 'nginx' ]]; then
+    success_print "------ nginx service ok ------"
+  else
+    error_print "------ nginx service failed ------"
+  fi
+
+  if [[ "${docker_ps}" =~ 'php' ]]; then
+    success_print "------ php service ok ------"
+  else
+    error_print "------ php service failed ------"
+  fi
+
+  if [[ "${docker_ps}" =~ 'mysql' ]]; then
+    success_print "------ mysql service ok ------"
+  else
+    error_print "------ mysql service failed ------"
+  fi
+
+  if [[ "${docker_ps}" =~ 'redis' ]]; then
+    success_print "------ redis service ok ------"
+  else
+    error_print "------ redis service failed ------"
+  fi
+
+  if [[ "${docker_ps}" =~ 'xunsearch' ]]; then
+    success_print "------ xunsearch service ok ------"
+  else
+    error_print "------ xunsearch service failed ------"
   fi
 }
 
@@ -111,328 +537,67 @@ upload_dir=/data/upload
 #录制目录
 record_dir=/data/record
 
-#解析参数
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-  --demo)
-    SITE_DEMO="$2"
-    shift 2
-    ;;
-  --domain)
-    SITE_DOMAIN="$2"
-    shift 2
-    ;;
-  *)
-    echo "unknown param: $1" >&2
-    exit 1
-    ;;
-  esac
-done
+#参数解析
+parse_args "$@"
 
-#检查--domain参数
-if [ -z "$SITE_DOMAIN" ]; then
-  error_print '--domain param is required'
-  exit 1
-fi
-
-#判断root用户
-if [[ $EUID -ne 0 ]]; then
-  error_print "------ this script must be run as root ------"
-  exit 1
-fi
+#检查root用户
+check_root
 
 #判断系统架构
-if [[ "$(uname -m)" != "x86_64" ]]; then
-  error_print "------ we only support x86_64 architecture currently ------"
-  exit 1
-fi
+check_arch
 
-normal_print "------ update host system ------"
-
-#安装git和curl
+#系统类型检测
 os=$(os_type) || {
   error_print "failed to detect OS type"
   exit 1
 }
 
-if [ "${os}" = 'ubuntu' ] || [ "${os}" = 'debian' ]; then
-  apt-get update
-  apt-get install -y curl git
-elif [ "${os}" = 'rhel' ]; then
-  if [ -z "$(command -v dnf)" ]; then
-    yum update
-    yum install -y curl git
-  else
-    dnf update
-    dnf install -y curl git
-  fi
-elif [ "${os}" = 'suse' ]; then
-  zypper refresh
-  zypper install -y curl git
-else
-  error_print "unsupported OS: ${os} (we only support ubuntu|debian|rhel|suse)"
-  exit 1
-fi
+#安装依赖包
+install_packages "${os}"
 
-normal_print "------ git clone wuwei-docker ------"
+#克隆项目
+clone_projects "${base_dir}" "${wuwei_dir}"
 
-#克隆wuwei-docker项目
-if [ ! -d ${base_dir} ]; then
-  git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite-docker.git ${base_dir}
-else
-  cd ${base_dir} && git pull --no-rebase
-fi
+#创建上传、录制目录
+setup_directories "${upload_dir}" "${record_dir}" "${wuwei_dir}"
 
-normal_print "------ git clone wuwei ------"
+#初始化环境变量
+init_env_variables "${base_dir}"
 
-#克隆wuwei项目
-if [ ! -d ${wuwei_dir} ]; then
+#配置nginx
+configure_nginx "${base_dir}" "${SITE_DOMAIN}"
 
-  #忽略文件模式（权限）变更
-  git config --global core.fileMode false
-  git config --global core.autocrlf false
-
-  git clone --depth 1 https://github.com/xiaochong0302/wuwei-lite.git ${wuwei_dir}
-
-  #加入安全目录
-  git config --global --add safe.directory ${wuwei_dir}
-
-else
-  cd ${wuwei_dir} && git pull --no-rebase
-fi
-
-#创建上传目录，拷贝默认图片
-if [ ! -d ${upload_dir} ]; then
-  mkdir -p ${upload_dir}/img
-  cp -R ${wuwei_dir}/public/static/home/img/default ${upload_dir}/img
-fi
-
-#创建录制目录
-if [ ! -d ${record_dir} ]; then
-  mkdir -p ${record_dir}
-fi
-
-#docker .env文件
-docker_env=${base_dir}/.env
-
-#复制环境变量文件
-cp ${base_dir}/.env.default ${docker_env}
-
-#替换docker .env配置项
-sed -i "s/MYSQL_ROOT_PASSWORD.*/MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}/g" ${docker_env}
-sed -i "s/MYSQL_DATABASE.*/MYSQL_DATABASE=${MYSQL_DATABASE}/g" ${docker_env}
-sed -i "s/MYSQL_USER.*/MYSQL_USER=${MYSQL_USER}/g" ${docker_env}
-sed -i "s/MYSQL_PASSWORD.*/MYSQL_PASSWORD=${MYSQL_PASSWORD}/g" ${docker_env}
-sed -i "s/REDIS_PASSWORD.*/REDIS_PASSWORD=${REDIS_PASSWORD}/g" ${docker_env}
-
-#nginx配置目录
-nginx_conf_dir=${base_dir}/nginx/conf.d
-nginx_default_conf=${nginx_conf_dir}/default.conf
-
-#复制nginx站点配置文件
-cp ${nginx_conf_dir}/default.conf.sample ${nginx_default_conf}
-
-#替换nginx default.conf配置项
-sed -i "s/server_name .*/server_name ${SITE_DOMAIN};/g" ${nginx_default_conf}
-
-#wuwei config目录
-wuwei_config_dir=${wuwei_dir}/config
-wuwei_config_php=${wuwei_config_dir}/config.php
-
-#复制config.php
-cp ${wuwei_config_dir}/config.default.php ${wuwei_config_php}
-
-#生成随机站点密钥
-site_key=$(random_str 32)
-
-#替换config.php配置项
-sed -i "s/\$config\['key'\].*/\$config['key'] = '${site_key}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['storage_base_uri'\].*/\$config['storage_base_uri'] = 'https:\/\/${SITE_DOMAIN}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['db'\]\['host'\].*/\$config['db']['host'] = '${MYSQL_HOST}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['db'\]\['port'\].*/\$config['db']['port'] = '${MYSQL_PORT}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['db'\]\['dbname'\].*/\$config['db']['dbname'] = '${MYSQL_DATABASE}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['db'\]\['username'\].*/\$config['db']['username'] = '${MYSQL_USER}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['db'\]\['password'\].*/\$config['db']['password'] = '${MYSQL_PASSWORD}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['redis'\]\['host'\].*/\$config['redis']['host'] = '${REDIS_HOST}';/g" ${wuwei_config_php}
-sed -i "s/\$config\['redis'\]\['auth'\].*/\$config['redis']['auth'] = '${REDIS_PASSWORD}';/g" ${wuwei_config_php}
+#配置应用
+configure_application "${wuwei_dir}" "${MYSQL_HOST}" "${MYSQL_PORT}" "${MYSQL_DATABASE}" "${MYSQL_USER}" "${MYSQL_PASSWORD}" "${REDIS_HOST}" "${REDIS_PASSWORD}" "${SITE_DOMAIN}"
 
 #复制xunsearch配置文件
-cp ${wuwei_config_dir}/xs.course.default.ini ${wuwei_config_dir}/xs.course.ini
-cp ${wuwei_config_dir}/xs.chapter.default.ini ${wuwei_config_dir}/xs.chapter.ini
-
-normal_print "------ install docker ------"
+copy_xunsearch_config "${wuwei_dir}"
 
 #安装docker
-if [ -z "$(command -v docker)" ]; then
-  bash ${base_dir}/get-docker.sh
-fi
+install_docker "${base_dir}/get-docker.sh"
 
-if [ -z "$(command -v docker)" ]; then
-  error_print "------ error: docker command not found, please try again ------"
-  exit 1
-fi
+#配置docker
+configure_docker
 
-if [ ! -d '/etc/docker' ]; then
-  mkdir -p '/etc/docker'
-fi
+#创建www-data用户
+create_www_data_user
 
-if [ ! -e '/etc/docker/daemon.json' ]; then
-  tee -a /etc/docker/daemon.json <<-EOF
-{
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "500m",
-    "max-file": "3"
-  }
-}
-EOF
-  systemctl daemon-reload
-  systemctl restart docker
-  chmod 666 /var/run/docker.sock
-fi
+#设置目录权限
+setup_directory_permissions "${base_dir}" "${wuwei_dir}" "${upload_dir}" "${record_dir}" "${MYSQL_UID}" "${REDIS_UID}"
 
-#统一创建www-data用户（兼容所有Linux发行版）
-if ! id -u www-data &>/dev/null; then
-  useradd -r -s /sbin/nologin www-data 2>/dev/null || true
-fi
-
-#设置应用目录属主
-chown -R www-data:www-data ${wuwei_dir} ${upload_dir} ${record_dir}
-
-#设置应用目录权限
-find ${upload_dir} ${record_dir} -type d -exec chmod 755 {} \;
-find ${upload_dir} ${record_dir} -type f -exec chmod 644 {} \;
-
-#修改mysql数据目录属主
-chown -R ${MYSQL_UID}:${MYSQL_UID} ${base_dir}/mysql/data ${base_dir}/mysql/log
-
-#修改redis数据目录属主
-chown -R ${REDIS_UID}:${REDIS_UID} ${base_dir}/redis/data
-
-#切换到基准目录
-cd ${base_dir} || exit
-
-normal_print "------ build docker images ------"
-
-docker compose up -d
+#启动docker服务
+start_docker_services "${base_dir}"
 
 #等待mysql服务
-docker exec -i wuwei-php bash <<'EOF'
-
-until nc -z -v -w30 mysql 3306 &> /dev/null
-do
-  echo "waiting for mysql service..."
-  sleep 5
-done
-
-exit
-EOF
+wait_mysql_service
 
 #导入测试数据
 if [ "${SITE_DEMO}" = 'on' ]; then
-
-  img_gz=${upload_dir}/img.tar.gz
-
-  normal_print "------ download img.tar.gz ------"
-
-  if [ ! -d ${upload_dir}/img/cover ]; then
-    curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/img.tar.gz -o ${img_gz}
-    tar -zxf ${img_gz} -C ${upload_dir} && rm -f ${img_gz}
-  fi
-
-  media_gz=${upload_dir}/media.tar.gz
-
-  normal_print "------ download media.tar.gz ------"
-
-  if [ ! -d ${upload_dir}/media ]; then
-    curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/media.tar.gz -o ${media_gz}
-    tar -zxf ${media_gz} -C ${upload_dir} && rm -f ${media_gz}
-  fi
-
-  demo_sql_gz=${base_dir}/mysql/data/demo.sql.gz
-
-  normal_print "------ import demo.sql.gz ------"
-
-  curl --retry 3 --retry-delay 5 --retry-max-time 30 https://download.koogua.com/wuwei-lite/demo.sql.gz -o ${demo_sql_gz}
-
-  docker exec -i wuwei-mysql bash <<'EOF'
-
-  gunzip < /var/lib/mysql/demo.sql.gz | mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}"
-
-  exit
-
-EOF
-
-  rm -f ${demo_sql_gz}
-
+  import_demo_data "${base_dir}" "${upload_dir}"
 fi
 
-normal_print "------ wuwei console upgrade ------"
+#初始化应用
+init_application
 
-#使用www-data用户运行，避免权限问题
-docker exec -i --user www-data:www-data wuwei-php bash <<'EOF'
-
-wuwei_dir=/var/www/html/wuwei
-
-#切换到wuwei目录
-cd ${wuwei_dir}
-
-echo -e "\n------ install composer packages ------\n"
-
-#安装依赖包
-composer install --no-dev
-composer dump-autoload --optimize
-
-echo -e "\n------ phinx migrate ------\n"
-
-#数据迁移
-vendor/bin/phinx migrate
-
-echo -e "\n------ php console upgrade ------\n"
-
-#程序升级
-php console.php upgrade
-
-echo -e "\n------ rebuild xunsearch index ------\n"
-
-#重建xunsearch索引
-php console.php course_index rebuild
-php console.php chapter_index rebuild
-
-#清理log
-rm -f storage/log/*.log
-
-exit
-EOF
-
-docker_ps=$(docker ps)
-
-if [[ "${docker_ps}" =~ 'nginx' ]]; then
-  success_print "------ nginx service ok ------"
-else
-  error_print "------ nginx service failed ------"
-fi
-
-if [[ "${docker_ps}" =~ 'php' ]]; then
-  success_print "------ php service ok ------"
-else
-  error_print "------ php service failed ------"
-fi
-
-if [[ "${docker_ps}" =~ 'mysql' ]]; then
-  success_print "------ mysql service ok ------"
-else
-  error_print "------ mysql service failed ------"
-fi
-
-if [[ "${docker_ps}" =~ 'redis' ]]; then
-  success_print "------ redis service ok ------"
-else
-  error_print "------ redis service failed ------"
-fi
-
-if [[ "${docker_ps}" =~ 'xunsearch' ]]; then
-  success_print "------ xunsearch service ok ------"
-else
-  error_print "------ xunsearch service failed ------"
-fi
+#检查服务状态
+check_services_status
